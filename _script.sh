@@ -1,5 +1,5 @@
 basepath=$1
-pathraw=$basepath/RAW2
+pathraw=$basepath/RAW
 pathedited=$basepath/EDITED
 darscodes=()
 nums=()
@@ -221,6 +221,24 @@ get_pure_num () {
   echo ${res[0]}
 }
 
+get_ext () {
+  local IFS="."
+  local res
+  read -r -a res <<< $1
+  
+  echo ${res[-1]}
+}
+
+get_custom_name () {
+  if [[ $1 == 'MADh_KAT_1' ]]; then
+    echo '١ - مقدمة الشيخ حول الكتاب والتوحيد'
+  elif [[ $1 == 'MADh_KAT_2' ]]; then
+   echo '٢ - العبادة ومقدمة الكتاب'
+  elif [[ $1 == 'MADh_KAT_3' ]]; then
+    echo '٣ - الباب الأول حتى المسألة الخامسة في الباب الثاني'
+  fi
+}
+
 get_syaikhname () {
   if [[ $1 == 'AAd' ]]; then
     echo 'الأستاذ عرفات العدني'
@@ -329,7 +347,7 @@ edit () {
   local txtname
   
   if [[ $isconcat == "0" ]]; then
-    txtname=""$txtname""
+    txtname="cutmiddle.txt"
   else
     txtname="${syaikhcode}_${darscode}_$num.txt"
   fi
@@ -360,7 +378,7 @@ edit () {
     done
     
     if [[ $isconcat == "0" ]]; then
-      convertconcat $syaikhcode $darscode "$editedname" "cutmiddle.txt"
+      convertconcat $syaikhcode $darscode "$editedname" "$txtname"
 
       middles=()
   
@@ -374,34 +392,36 @@ edit () {
 }
 
 run_txt_concat () {
-  set +o noglob
-
-  for txtraw in "$pathraw"/*.txt; do
-    local IFS="/"
-    local res
-    read -r -a res <<< $txtraw
+  for raw in $(ls -v $pathraw); do
+    local ext="$(get_ext "$raw")"
     
-    local txtname=${res[-1]}
-    
-    local IFS="_"
-    read -r -a res <<< $txtname
-    
-    local syaikhcode=${res[0]}
-    local darscode=${res[1]}
-    local num=${res[2]: 0: -4}
-    local editedname="${syaikhcode}_${darscode}_$num.m4a"
-    
-    local from=$pathedited/"${syaikhcode}_${darscode}_$num.m4a"
-    local to=$basepath/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)"/"$(get_darsname $darscode) - $(num_to_arnum $num).m4a"
-    
-    if ls $pathedited | grep -q "${syaikhcode}_${darscode}_$num.m4a"; then
+    if [[ $ext == 'txt' ]]; then
+      local IFS="/"
+      local res
+      read -r -a res <<< $txtraw
+      
+      local txtname=${res[-1]}
+      
+      local IFS="_"
+      read -r -a res <<< $txtname
+      
+      local syaikhcode=${res[0]}
+      local darscode=${res[1]}
+      local num=${res[2]: 0: -4}
+      local editedname="${syaikhcode}_${darscode}_$num.m4a"
+      
+      local from=$pathedited/"${syaikhcode}_${darscode}_$num.m4a"
+      local to=$basepath/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)"/"$(get_darsname $darscode) - $(num_to_arnum $num).m4a"
+      
+      if ls $pathedited | grep -q "${syaikhcode}_${darscode}_$num.m4a"; then
+          cp $from $to
+      else      
+        convertconcat $syaikhcode $darscode "$editedname" "$txtname"
+        
+        rm "$txtraw"
+        
         cp $from $to
-    else      
-      convertconcat $syaikhcode $darscode "$editedname" "$txtname"
-      
-      rm "$txtraw"
-      
-      cp $from $to
+      fi
     fi
   done
 }
@@ -431,8 +451,13 @@ main () {
         local to=$basepath/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)"/"$(get_darsname $darscode) - $(num_to_arnum $purenum).m4a"
         
         if ls $pathedited | grep -q "${syaikhcode}_${darscode}_$purenum.m4a"; then
-          cp $from $to
-          
+          if ls $basepath/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)" | grep -q "$(get_darsname $darscode) - $(num_to_arnum $purenum).m4a"; then :
+          elif ls $basepath/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)" | grep -q get_custom_name "${syaikhcode}_${darscode}_$purenum"
+            then :
+          else
+            echo COPY
+            cp $from $to
+          fi
         else
           edit "$raw" "$startend" "$syaikhcode" "$darscode" "$purenum" "$isconcat"
 

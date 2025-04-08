@@ -3,4 +3,4 @@ echo =========
 
 basepath=~/storage/shared/Durus
 
-~/coding/scripts/_script.sh "$basepath"
+~/coding/edaudio/_script.sh "$basepath"
