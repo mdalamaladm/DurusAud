@@ -1,6 +1,7 @@
-dos2unix ~/coding/edaudio/_script.sh
+dos2unix "$EDAUDIO_BASEPATH/_script.sh"
 echo =========
 
-basepath=~/storage/shared/Durus
+source=$EDAUDIO_SOURCE
+format="$1"
 
-~/coding/edaudio/_script.sh "$basepath"
+"$EDAUDIO_BASEPATH/_script.sh" $format

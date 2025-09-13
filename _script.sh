@@ -1,12 +1,21 @@
-basepath=$1
-pathraw=$basepath/RAW
-pathedited=$basepath/EDITED
+format="${1:-mp3}"
+source=$EDAUDIO_SOURCE
+pathraw=$source/RAW
+pathedited=$source/EDITED
 darscodes=()
 nums=()
 rawtimes=()
 middles=()
 invalid=()
 edited=()
+encoder="libmp3lame"
+
+if [[ $format == "mp3" ]]; then
+  encoder="libmp3lame"
+elif [[ $format == "m4a" ]]; then
+  encoder="libfdk_aac"
+fi
+
 
 get_syaikhcode () {
   local data=$(get_splitted 0 $1)
@@ -230,51 +239,39 @@ get_ext () {
 }
 
 get_custom_name () {
-  if [[ $1 == 'MADh_KAT_1' ]]; then
-    echo '١ - مقدمة الشيخ حول الكتاب والتوحيد'
-  elif [[ $1 == 'MADh_KAT_2' ]]; then
-   echo '٢ - العبادة ومقدمة الكتاب'
-  elif [[ $1 == 'MADh_KAT_3' ]]; then
-    echo '٣ - الباب الأول حتى المسألة الخامسة في الباب الثاني'
-  fi
+  while IFS= read -r line; do
+    local IFS="="
+    local res
+    read -r -a res <<< $line
+    # Process each 'line' here
+    if [[ $1 == ${res[0]} ]]; then
+      echo ${res[1]}
+    fi
+  done < custom.txt
 }
 
 get_syaikhname () {
-  if [[ $1 == 'AAd' ]]; then
-    echo 'الأستاذ عرفات العدني'
-  elif [[ $1 == 'ABr' ]]; then
-    echo 'الشيخ أحمد بن عمر البركاني'
-  elif [[ $1 == 'AWh' ]]; then
-    echo 'الشيخ أحمد الوهطي'
-  elif [[ $1 == 'MADh' ]]; then
-    echo 'الشيخ محمد بن علي الضالعي'
-  elif [[ $1 == 'MBw' ]]; then
-    echo 'الشيخ محمد باوجيه'
-  fi
+  while IFS= read -r line; do
+    local IFS="="
+    local res
+    read -r -a res <<< $line
+    # Process each 'line' here
+    if [[ $1 == ${res[0]} ]]; then
+      echo ${res[1]}
+    fi
+  done < syaikh.txt
 }
 
 get_darsname () {
-  if [[ $1 == 'AAAW' ]]; then
-    echo 'العقيدة الواسطية لشيخ الإسلام ابن تيمية'
-  elif [[ $1 == 'AI' ]]; then
-    echo 'الإعراب للشيخ عبد الله الفوزان'
-  elif [[ $1 == 'AQAA' ]]; then
-    echo 'القواعد الأربع للشيخ محمد بن عبد الوهاب'
-  elif [[ $1 == 'AQAM' ]]; then
-   echo 'القواعد المثلى للشيخ محمد بن صالح العثيمين'
-  elif [[ $1 == 'AR' ]]; then
-    echo 'الرسالة للإمام الشافعي'
-  elif [[ $1 == 'KASy' ]]; then
-    echo 'كشف الشبهات للشيخ محمد بن عبد الوهاب'
-  elif [[ $1 == 'KAT' ]]; then
-    echo 'كتاب التوحيد للشيخ محمد بن عبد الوهاب'
-  elif [[ $1 == 'LAI' ]]; then
-    echo 'لمعة الاعتقاد لابن قدامة المقدسي'
-  elif [[ $1 == 'SIbA' ]]; then
-    echo 'شرح ابن عقيل على ألفية ابن مالك'
-  elif [[ $1 == 'TKAI' ]]; then
-    echo 'تحقيق كللمة الإخلاص لابن رجب الحنبلي'
-  fi
+  while IFS= read -r line; do
+    local IFS="="
+    local res
+    read -r -a res <<< $line
+    # Process each 'line' here
+    if [[ $1 == ${res[0]} ]]; then
+      echo ${res[1]}
+    fi
+  done < dars.txt
 }
 
 convert () {
@@ -289,9 +286,9 @@ convert () {
     -ss $start \
     -to $end \
     -i $pathraw/"$raw" \
-    -i $basepath/ALBUM/"${syaikhcode}_$darscode.jpg" \
+    -i $source/ALBUM/"${syaikhcode}_$darscode.jpg" \
     -c:v copy \
-    -c:a libfdk_aac \
+    -c:a $encoder \
     -b:a 32k \
     -disposition:v:0 attached_pic \
     -map 0:0 \
@@ -313,9 +310,9 @@ convertconcat () {
     -f concat \
     -safe 0 \
     -i "$pathraw"/"$txtname" \
-    -i $basepath/ALBUM/"${syaikhcode}_$darscode.jpg" \
+    -i $source/ALBUM/"${syaikhcode}_$darscode.jpg" \
     -c:v copy \
-    -c:a libfdk_aac \
+    -c:a $encoder \
     -b:a 32k \
     -disposition:v:0 attached_pic \
     -map 0:0 \
@@ -343,7 +340,7 @@ edit () {
     get_time "$(get_end $startend)"
     )"
   local endsecond=$(time_to_second $end)
-  local editedname="${syaikhcode}_${darscode}_$num.m4a"
+  local editedname="${syaikhcode}_${darscode}_$num.$format"
   local txtname
   
   if [[ $isconcat == "0" ]]; then
@@ -408,12 +405,12 @@ run_txt_concat () {
       local syaikhcode=${res[0]}
       local darscode=${res[1]}
       local num=${res[2]: 0: -4}
-      local editedname="${syaikhcode}_${darscode}_$num.m4a"
+      local editedname="${syaikhcode}_${darscode}_$num.$format  "
       
-      local from=$pathedited/"${syaikhcode}_${darscode}_$num.m4a"
-      local to=$basepath/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)"/"$(get_darsname $darscode) - $(num_to_arnum $num).m4a"
+      local from=$pathedited/"${syaikhcode}_${darscode}_$num.$format  "
+      local to=$source/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)"/"$(get_darsname $darscode) - $(num_to_arnum $num).$format"
       
-      if ls $pathedited | grep -q "${syaikhcode}_${darscode}_$num.m4a"; then
+      if ls $pathedited | grep -q "${syaikhcode}_${darscode}_$num.$format "; then
           cp $from $to
       else      
         convertconcat $syaikhcode $darscode "$editedname" "$txtname"
@@ -447,12 +444,12 @@ main () {
       get_middles $rawtime
       
       if [[ $rawlength == "5" ]]; then
-        local from=$pathedited/"${syaikhcode}_${darscode}_$purenum.m4a"
-        local to=$basepath/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)"/"$(get_darsname $darscode) - $(num_to_arnum $purenum).m4a"
+        local from=$pathedited/"${syaikhcode}_${darscode}_$purenum.$format  "
+        local to=$source/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)"/"$(get_darsname $darscode) - $(num_to_arnum $purenum).$format  "
         
-        if ls $pathedited | grep -q "${syaikhcode}_${darscode}_$purenum.m4a"; then
-          if ls $basepath/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)" | grep -q "$(get_darsname $darscode) - $(num_to_arnum $purenum).m4a"; then :
-          elif ls $basepath/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)" | grep -q get_custom_name "${syaikhcode}_${darscode}_$purenum"
+        if ls $pathedited | grep -q "${syaikhcode}_${darscode}_$purenum.$format "; then
+          if ls $source/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)" | grep -q "$(get_darsname $darscode) - $(num_to_arnum $purenum).$format"; then :
+          elif ls $source/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)" | grep -q get_custom_name "${syaikhcode}_${darscode}_$purenum"
             then :
           else
             echo COPY
