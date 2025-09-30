@@ -1,5 +1,5 @@
 format="${1:-mp3}"
-source=$EDAUDIO_SOURCE
+source=$DURUSAUD_SOURCE
 pathraw=$source/RAW
 pathedited=$source/EDITED
 darscodes=()
@@ -50,7 +50,7 @@ get_rawtimes () {
   read -r -a rawtimes <<< $data
 }
 
-get_startend () {
+get_pure_startend () {
   local data
   local IFS='('
   read -r -a data <<< $1
@@ -121,10 +121,15 @@ get_hour_minute () {
   read -r -a res <<< $1
   
   local minute=${res[0]: 0: -2}
+  if [[ $minute == '' ]]; then
+    minute=0
+  fi
   minute=$(( 10#$minute ))
+  
   local hour=$(( $minute/60 ))
   minute=$(pad_two_zeros $(($minute-($hour*60))))
   hour=$(pad_two_zeros $hour)
+  
   echo "$hour:$minute"
 }
 
@@ -142,13 +147,26 @@ time_to_second () {
   local IFS="."
   local res2
   read -r -a res2 <<< ${res[2]}
+  
 
   local hour=${res[0]}
+  if [[ $hour == '' ]]; then
+    hour=0
+  fi
   hour=$(( 10#$hour ))
+  
   local minute=${res[1]}
+  if [[ $minute == '' ]]; then
+    minute=0
+  fi
   minute=$(( 10#$minute ))
+  
   local second=${res2[0]}
+  if [[ $second == '' ]]; then
+    second=0
+  fi
   second=$(( 10#$second ))
+  
   local milisecond=${res2[1]}
   
   local secondtotal=$((( $hour*60*60 )+( $minute*60 )+ $second ))
@@ -161,7 +179,11 @@ time_to_second () {
 }
 
 pad_two_zeros () {
-  printf '%02d' "${1#0}"
+  if [[ $1 -gt 9 ]]; then
+    echo $1
+  else
+    echo "0$1"
+  fi
 }
 
 num_to_arnum () {
@@ -247,7 +269,7 @@ get_custom_name () {
     if [[ $1 == ${res[0]} ]]; then
       echo ${res[1]}
     fi
-  done < custom.txt
+  done < "$DURUSAUD_SOURCE/custom.txt"
 }
 
 get_syaikhname () {
@@ -259,7 +281,7 @@ get_syaikhname () {
     if [[ $1 == ${res[0]} ]]; then
       echo ${res[1]}
     fi
-  done < syaikh.txt
+  done < "$DURUSAUD_SOURCE/syaikh.txt"
 }
 
 get_darsname () {
@@ -271,16 +293,17 @@ get_darsname () {
     if [[ $1 == ${res[0]} ]]; then
       echo ${res[1]}
     fi
-  done < dars.txt
+  done < "$DURUSAUD_SOURCE/dars.txt"
 }
 
 convert () {
   raw=$1
   syaikhcode=$2
   darscode=$3
-  editedname=$4
-  start=$5
-  end=$6
+  num=$4
+  format=$5
+  start=$6
+  end=$7
   
   ffmpeg \
     -ss $start \
@@ -297,14 +320,15 @@ convert () {
     -metadata title="" \
     -metadata artist="$(get_syaikhname $syaikhcode)" \
     -metadata album="$(get_darsname $darscode)" \
-    "$pathedited/$editedname"
+    "$pathedited/$(get_syaikhname $syaikhcode)/$(get_darsname $darscode)/$(get_darsname $darscode) - $(num_to_arnum $num).$format"
 }
 
 convertconcat () {
   syaikhcode=$1
   darscode=$2
-  editedname=$3
-  txtname=$4
+  num=$3
+  format=$4
+  txtname=$5
   
   ffmpeg \
     -f concat \
@@ -321,7 +345,7 @@ convertconcat () {
     -metadata title="" \
     -metadata artist="$(get_syaikhname $syaikhcode)" \
     -metadata album="$(get_darsname $darscode)" \
-    "$pathedited/$editedname"
+    "$pathedited/$(get_syaikhname $syaikhcode)/$(get_darsname $darscode)/$(get_darsname $darscode) - $(num_to_arnum $num).$format"
 }
 
 edit () {
@@ -332,15 +356,12 @@ edit () {
   local num=$5
   local isconcat=$6
   
-  local start="$(
-    get_time "$(get_start $startend)"
-    )"
-  local startsecond=$(time_to_second $start)
-  local end="$(
-    get_time "$(get_end $startend)"
-    )"
-  local endsecond=$(time_to_second $end)
-  local editedname="${syaikhcode}_${darscode}_$num.$format"
+  local start="$(get_time "$(get_start $startend)")" # Get start time only and then format it to mm:ss.S or mm:ss, example: 2:08.3
+  local end="$(get_time "$(get_end $startend)")" # Get end time only and then format it to mm:ss.S or mm:ss, example: 45:20
+  local startsecond=$(time_to_second $start) # Get start time with seconds format, example: 128.3
+  local endsecond=$(time_to_second $end) # Get end time with seconds format, example: 2720
+  
+  # Differ .txt file name between removed middle audio and separate parts audio
   local txtname
   
   if [[ $isconcat == "0" ]]; then
@@ -349,34 +370,43 @@ edit () {
     txtname="${syaikhcode}_${darscode}_$num.txt"
   fi
 
+  # 3 conditions:
+  # 1. If has middles, handle middles with .txt file. It also includes separate parts audio with middle in it
+  # 2. Else if it's handle separated parts audio, handle separate parts with .txt file
+  # 3. If Neither middle nor separate parts, handle single audio without the middle
   if [[ ${#middles[@]} -gt 0 ]]; then
+    # Looping for each range of middle time
     for mididx in ${!middles[@]}; do
-      local midtime=${middles[$mididx]}
-      local middlestartraw="$(get_start $midtime)"
-      local midstart="$(get_time "$middlestartraw")"
-      local midstartsecond=$(time_to_second $midstart)
-      local middleendraw="$(get_end $midtime)"
-      local midend="$(get_time "$middleendraw")"
-      local midendsecond=$(time_to_second $midend)
+      local middletime=${middles[$mididx]}
+
+      # Get start and end of each range, with mm:ss.S format and seconds format
+      local middlestart="$(get_time "$(get_start $middletime)")"
+      local middleend="$(get_time "$(get_end $middleend)")"
+      local middlestartsecond=$(time_to_second $middlestart)
+      local middleendsecond=$(time_to_second $middleend)
       
+      # Create config file for middle removed audio or separated parts audio
       touch "$pathraw"/"$txtname"
       chmod +x "$pathraw"/"$txtname"
       
+      # Handle config file according to range conditions
       if [[ ${#middles[@]} == 1 ]]; then
-        printf "file '$pathraw/$raw'\ninpoint $startsecond\noutpoint $midstartsecond\n" >> "$pathraw"/"$txtname"
-        printf "file '$pathraw/$raw'\ninpoint $midendsecond\noutpoint $endsecond\n" >> "$pathraw"/"$txtname"
+        printf "file '$pathraw/$raw'\ninpoint $startsecond\noutpoint $middlestartsecond\n" >> "$pathraw"/"$txtname"
+        printf "file '$pathraw/$raw'\ninpoint $middleendsecond\noutpoint $endsecond\n" >> "$pathraw"/"$txtname"
       elif [[ $mididx == 0 ]]; then
-        printf "file '$pathraw/$raw'\ninpoint $startsecond\noutpoint $midstartsecond\nfile '$pathraw/$raw'\ninpoint $midendsecond\n" >> "$pathraw"/"$txtname"
+        printf "file '$pathraw/$raw'\ninpoint $startsecond\noutpoint $middlestartsecond\nfile '$pathraw/$raw'\ninpoint $middleendsecond\n" >> "$pathraw"/"$txtname"
       elif [[ $mididx == $((${#middles[@]} - 1)) ]]; then
-        printf "outpoint $midstartsecond\nfile '$pathraw/$raw'\ninpoint $midendsecond\noutpoint $endsecond\n" >> "$pathraw"/"$txtname"
+        printf "outpoint $middlestartsecond\nfile '$pathraw/$raw'\ninpoint $middleendsecond\noutpoint $endsecond\n" >> "$pathraw"/"$txtname"
       else
-        printf "outpoint $midstartsecond\nfile '$pathraw/$raw'\ninpoint $midendsecond\n" >> "$pathraw"/"$txtname"
+        printf "outpoint $middlestartsecond\nfile '$pathraw/$raw'\ninpoint $middleendsecond\n" >> "$pathraw"/"$txtname"
       fi
     done
     
+    # If it is single audio, immediately edit the audio with the config file, else, it will run it later
     if [[ $isconcat == "0" ]]; then
-      convertconcat $syaikhcode $darscode "$editedname" "$txtname"
-
+      # Run FFMPEG with config file
+      convertconcat $syaikhcode $darscode $num $format "$txtname"
+  
       middles=()
   
       rm "$pathraw"/"$txtname"
@@ -384,42 +414,38 @@ edit () {
   elif [[ $isconcat == "1" ]]; then
     printf "file '$pathraw/$raw'\ninpoint $startsecond\noutpoint $endsecond\n" >> "$pathraw"/"$txtname"
   else
-    convert "$raw" $syaikhcode $darscode "$editedname" $start $end
+    # Run FFMPEG
+    convert "$raw" $syaikhcode $darscode $num $format $start $end
   fi
 }
 
 run_txt_concat () {
+  # Looping all files
   for raw in $(ls -v $pathraw); do
     local ext="$(get_ext "$raw")"
     
-    if [[ $ext == 'txt' ]]; then
-      local IFS="/"
-      local res
-      read -r -a res <<< $txtraw
-      
-      local txtname=${res[-1]}
-      
-      local IFS="_"
-      read -r -a res <<< $txtname
-      
-      local syaikhcode=${res[0]}
-      local darscode=${res[1]}
-      local num=${res[2]: 0: -4}
-      local editedname="${syaikhcode}_${darscode}_$num.$format  "
-      
-      local from=$pathedited/"${syaikhcode}_${darscode}_$num.$format  "
-      local to=$source/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)"/"$(get_darsname $darscode) - $(num_to_arnum $num).$format"
-      
-      if ls $pathedited | grep -q "${syaikhcode}_${darscode}_$num.$format "; then
-          cp $from $to
-      else      
-        convertconcat $syaikhcode $darscode "$editedname" "$txtname"
-        
-        rm "$txtraw"
-        
-        cp $from $to
-      fi
+    # If file is not config file, skip
+    if [[ $ext != 'txt' ]]; then
+      continue
     fi
+
+    # Get file config name
+    local IFS="/"
+    local res
+    read -r -a res <<< $raw
+    local txtname=${res[-1]}
+    
+    # Extract syaikh code, dars code, and dars num for config file name
+    local IFS="_"
+    read -r -a res <<< $txtname
+    local syaikhcode=${res[0]}
+    local darscode=${res[1]}
+    local num=${res[2]: 0: -4}
+    
+    # Run FFMPEG with config file
+    convertconcat $syaikhcode $darscode $num $format "$txtname"
+      
+    rm "$raw"
   done
 }
 
@@ -427,47 +453,52 @@ IFS=$'\n'
 set -o noglob
 
 main () {
+  # Looping each audio file in RAW folder
   for raw in $(ls -v $pathraw); do
-    get_darscodes $raw
-    get_nums $raw
-    get_rawtimes $raw
-    local syaikhcode="$(get_syaikhcode $raw)"
+    local ext="$(get_ext "$raw")"
+    
+    # If file is config file, skip
+    if [[ $ext == 'txt' ]]; then
+      continue
+    fi
+    
+    get_darscodes $raw # Get all code for each dars in an array, example: (AQAM KAT)
+    get_nums $raw # Get all number for each dars in an array, example: (12 20)
+    get_rawtimes $raw # Get All start time and end time for each dars in an array, example: (208^3-4520 130-3520^5)
+    local syaikhcode="$(get_syaikhcode $raw)" # Get a code of syaikh for these dars
+    
+    # Looping each dars
     for codeidx in ${!darscodes[@]}; do
       local darscode=${darscodes[$codeidx]}
       local num=${nums[$codeidx]}
       local rawtime=${rawtimes[$codeidx]}
-      local startend="$(get_startend $rawtime)"
-      local rawlength="$(get_splitted_length $raw)"
-      local isconcat=$(check_concat $num)
-      local purenum=$(get_pure_num $num)
+      local startend="$(get_pure_startend $rawtime)" # Get pure start time and end time, without it's middle time
+      local rawlength="$(get_splitted_length $raw)" # Get how many metadata included in file name
+      local isconcat=$(check_concat $num) # Check if dars number is separated into parts, so it will be concatenated
+      local purenum=$(get_pure_num $num) # Get pure dars num, without part number
       
-      get_middles $rawtime
+      get_middles $rawtime # Get all range of time in the middle, between start time and end time, so it will be removed
       
+      # If metadata is completed, and they are: Syaikh code, Dars code, Dars number, Start time and end time
       if [[ $rawlength == "5" ]]; then
-        local from=$pathedited/"${syaikhcode}_${darscode}_$purenum.$format  "
-        local to=$source/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)"/"$(get_darsname $darscode) - $(num_to_arnum $purenum).$format  "
+        # Create syaikh folder if not yet created
+        [ ! -d "$pathedited"/"$(get_syaikhname $syaikhcode)" ] && mkdir -p "$pathedited"/"$(get_syaikhname $syaikhcode)"
         
-        if ls $pathedited | grep -q "${syaikhcode}_${darscode}_$purenum.$format "; then
-          if ls $source/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)" | grep -q "$(get_darsname $darscode) - $(num_to_arnum $purenum).$format"; then :
-          elif ls $source/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)" | grep -q get_custom_name "${syaikhcode}_${darscode}_$purenum"
-            then :
-          else
-            echo COPY
-            cp $from $to
-          fi
+        # Create dars folder if not yet created
+        [ ! -d "$pathedited"/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)" ] && mkdir -p "$pathedited"/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)"
+        
+        # If the audio file is already edited, skip it, else, proceed the edit
+        if ls $pathedited/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)" 2>/dev/null | grep -q "$(get_darsname $darscode) - $(num_to_arnum $purenum).$format" 2>/dev/null; then :
+        elif ls $pathedited/"$(get_syaikhname $syaikhcode)"/"$(get_darsname $darscode)" 2>/dev/null  | grep -q get_custom_name "${syaikhcode}_${darscode}_$purenum" 2>/dev/null
+          then :
         else
           edit "$raw" "$startend" "$syaikhcode" "$darscode" "$purenum" "$isconcat"
-
-          if [[ $isconcat == "0" ]]; then
-            cp $from $to
-          fi
         fi
-      else
-        invalid+=("${syaikhcode}_${darscode}_$purenum")
       fi
     done
   done
 
+  # Run FFMPEG with config file for separated parts audio
   run_txt_concat
 }
 
